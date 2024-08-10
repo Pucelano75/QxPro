@@ -1,0 +1,310 @@
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import Image, ImageTk
+import pandas as pd
+import os
+from datetime import datetime
+
+class PlanificacionQuirofanos:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Planificación de Quirófanos")
+        self.root.geometry("1750x750")
+        self.root.configure(bg="#E6F0FA")
+
+        # Crear el frame principal que contendrá toda la interfaz
+        self.main_frame = tk.Frame(self.root, bg="#E6F0FA")
+        self.main_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        # Crear los widgets de la interfaz
+        self.create_widgets()
+
+        # Datos
+        self.data = []
+        self.filtered_data = []
+        self.file_name = 'planificacion_quirofanos.xlsx'
+        self.load_data()
+        self.populate_treeview()
+
+        # Vincular el clic en la ventana principal para limpiar los campos de entrada
+        self.main_frame.bind('<Button-1>', self.on_main_frame_click)
+
+    def create_widgets(self):
+        # Colores y estilos
+        label_color = "#003366"
+        entry_bg_color = "#FFFFFF"
+        button_bg_color = "#00509E"
+        button_fg_color = "#FFFFFF"
+        treeview_bg_color = "#FFFFFF"
+        treeview_heading_bg_color = "#00509E"
+        treeview_heading_fg_color = "#003366"
+
+        # Frame para los campos de entrada
+        input_frame = tk.Frame(self.main_frame, bg="#E6F0FA")
+        input_frame.grid(row=0, column=0, padx=10, pady=10, sticky=tk.W)
+
+        # Labels y entries
+        labels = ["Cirujano", "Especialidad", "Fecha Cirugía", "Nombre Paciente", "Tipo Cirugía", "Compañía", "Autorización", "Estado de la Cirugía", "Estado Presupuesto", "Observaciones"]
+        self.entries = {}
+
+        for idx, label in enumerate(labels):
+            tk.Label(input_frame, text=label, bg="#E6F0FA", fg=label_color).grid(row=idx, column=0, pady=5, sticky=tk.W)
+            if label == "Autorización":
+                self.entries[label] = ttk.Combobox(input_frame, values=["Autorizado", "No Autorizado", "Pendiente"])
+            elif label == "Estado de la Cirugía":
+                self.entries[label] = ttk.Combobox(input_frame, values=["Programada", "No Programada"])
+            elif label == "Estado Presupuesto":
+                self.entries[label] = ttk.Combobox(input_frame, values=["Autorizado", "No Autorizado", "Otros"])
+            else:
+                self.entries[label] = tk.Entry(input_frame, bg=entry_bg_color, fg=label_color)
+            self.entries[label].grid(row=idx, column=1, pady=5, padx=5, sticky=tk.W+tk.E)
+
+        # Frame para la búsqueda
+        search_frame = tk.Frame(self.main_frame, bg="#E6F0FA")
+        search_frame.grid(row=1, column=0, padx=10, pady=10, sticky=tk.W)
+
+        tk.Label(search_frame, text="Buscar:", bg="#E6F0FA", fg=label_color).pack(side=tk.LEFT, padx=5)
+        self.search_entry = tk.Entry(search_frame, bg=entry_bg_color, fg=label_color)
+        self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+        self.search_combobox = ttk.Combobox(search_frame, values=labels, state="readonly")
+        self.search_combobox.pack(side=tk.LEFT, padx=5)
+        self.search_combobox.set("Seleccione Campo")
+        self.search_combobox.bind("<<ComboboxSelected>>", self.on_search_combobox_selected)
+
+        # Combo box para valores predeterminados en búsqueda
+        self.search_value_combobox = ttk.Combobox(search_frame, state="readonly")
+        self.search_value_combobox.pack(side=tk.LEFT, padx=5)
+        self.search_value_combobox.pack_forget()  # Se oculta inicialmente
+
+        tk.Button(search_frame, text="Buscar", command=self.search_record, bg=button_bg_color, fg=button_fg_color).pack(side=tk.LEFT, padx=5)
+        tk.Button(search_frame, text="Limpiar Filtro", command=self.clear_search, bg=button_bg_color, fg=button_fg_color).pack(side=tk.LEFT, padx=5)
+
+        # Frame para el logo
+        logo_frame = tk.Frame(self.main_frame, bg="#E6F0FA")
+        logo_frame.grid(row=0, column=1, rowspan=2, padx=10, pady=10, sticky=tk.N+tk.E)
+
+        self.load_logo(logo_frame)
+
+        # Frame para el Treeview y la barra de desplazamiento
+        treeview_frame = tk.Frame(self.main_frame, bg="#E6F0FA")
+        treeview_frame.grid(row=2, column=0, columnspan=2, padx=10, pady=10, sticky=tk.N+tk.S+tk.E+tk.W)
+
+        # Agregar barra de desplazamiento vertical
+        self.tree_scroll = tk.Scrollbar(treeview_frame)
+        self.tree_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Treeview para mostrar los registros
+        style = ttk.Style()
+        style.configure("Treeview", background=treeview_bg_color, foreground=label_color, rowheight=25, fieldbackground=treeview_bg_color)
+        style.configure("Treeview.Heading", background=treeview_heading_bg_color, foreground=treeview_heading_fg_color, font=('Arial', 10, 'bold'))
+
+        self.tree = ttk.Treeview(treeview_frame, columns=("ID",) + tuple(labels), show='headings', style="Treeview", yscrollcommand=self.tree_scroll.set)
+        self.tree_scroll.config(command=self.tree.yview)
+
+        for col in self.tree['columns']:
+            self.tree.heading(col, text=col)
+            self.tree.column(col, width=140)
+        self.tree.pack(fill=tk.BOTH, expand=True)
+        self.tree.bind('<<TreeviewSelect>>', self.on_treeview_select)
+
+        # Buttons frame
+        buttons_frame = tk.Frame(self.main_frame, bg="#E6F0FA")
+        buttons_frame.grid(row=3, column=0, columnspan=2, pady=10)
+
+        # Buttons
+        tk.Button(buttons_frame, text="Nuevo", command=self.add_record, bg=button_bg_color, fg=button_fg_color).grid(row=0, column=0, padx=5)
+        tk.Button(buttons_frame, text="Modificar", command=self.modify_record, bg=button_bg_color, fg=button_fg_color).grid(row=0, column=1, padx=5)
+        tk.Button(buttons_frame, text="Eliminar", command=self.delete_record, bg=button_bg_color, fg=button_fg_color).grid(row=0, column=2, padx=5)
+        tk.Button(buttons_frame, text="Visualización", command=self.show_data, bg=button_bg_color, fg=button_fg_color).grid(row=0, column=3, padx=5)
+
+    def load_logo(self, frame):
+        try:
+            logo_image = Image.open("logo.jpg")
+            logo_image = logo_image.resize((150, 150), Image.LANCZOS)
+            logo_photo = ImageTk.PhotoImage(logo_image)
+        except FileNotFoundError:
+            logo_photo = None
+            messagebox.showwarning("Advertencia", "Archivo de logo no encontrado.")
+        
+        logo_label = tk.Label(frame, image=logo_photo, bg="#E6F0FA")
+        logo_label.image = logo_photo  # Necesario para evitar que la imagen sea recolectada por el garbage collector
+        logo_label.pack()
+
+    def add_record(self):
+        record = {label: entry.get() for label, entry in self.entries.items()}
+        record["ID"] = len(self.data) + 1
+        
+        # Validar formato de fecha
+        try:
+            fecha_cirugia = datetime.strptime(record["Fecha Cirugía"], "%d/%m/%Y")
+        except ValueError:
+            messagebox.showwarning("Advertencia", "El formato de la fecha debe ser dd/mm/yyyy.")
+            return
+        
+        # Verificar que todos los campos excepto "Observaciones" estén llenos
+        if all(record.values()) or record["Observaciones"] == "":
+            self.data.append(record)
+            self.save_data()
+            self.clear_entries()
+            self.populate_treeview()
+        else:
+            messagebox.showwarning("Advertencia", "Todos los campos excepto Observaciones son obligatorios")
+
+    def modify_record(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Seleccione un registro para modificar")
+            return
+
+        item = self.tree.item(selected_item)
+        record_id = item["values"][0]
+
+        for record in self.data:
+            if record["ID"] == record_id:
+                for label, entry in self.entries.items():
+                    record[label] = entry.get()
+                self.save_data()
+                self.clear_entries()
+                self.populate_treeview()
+                break
+
+    def delete_record(self):
+        selected_item = self.tree.selection()
+        if not selected_item:
+            messagebox.showwarning("Advertencia", "Seleccione un registro para eliminar")
+            return
+
+        item = self.tree.item(selected_item)
+        record_id = item["values"][0]
+
+        self.data = [record for record in self.data if record["ID"] != record_id]
+        self.save_data()
+        self.clear_entries()
+        self.populate_treeview()
+
+    def show_data(self):
+        new_window = tk.Toplevel(self.root)
+        new_window.title("Visualización de Datos")
+        new_window.geometry("1000x600")
+        new_window.configure(bg="#E6F0FA")
+
+        # Crear un Frame para contener el Canvas y la Scrollbar
+        container = tk.Frame(new_window, bg="#E6F0FA")
+        container.pack(fill=tk.BOTH, expand=True)
+
+        # Crear el Canvas
+        canvas = tk.Canvas(container)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        # Crear la Scrollbar
+        scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Crear un Frame dentro del Canvas
+        canvas_frame = tk.Frame(canvas, bg="#E6F0FA")
+        canvas_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+
+        # Añadir el Frame al Canvas
+        canvas.create_window((0, 0), window=canvas_frame, anchor="nw")
+
+        # Configurar el Canvas para la Scrollbar
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        # Crear el Treeview
+        tree = ttk.Treeview(canvas_frame, columns=self.tree["columns"], show='headings', style="Treeview")
+        for col in tree['columns']:
+            tree.heading(col, text=col)
+            tree.column(col, width=140)  # Ajustar el ancho según sea necesario
+        tree.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+
+        # Mostrar solo los datos filtrados si existen
+        data_to_display = self.filtered_data if self.filtered_data else self.data
+        for record in data_to_display:
+            tree.insert('', 'end', values=tuple(record[col] for col in tree['columns']))
+
+    def clear_entries(self):
+        for entry in self.entries.values():
+            entry.delete(0, tk.END)
+
+    def search_record(self):
+        query = self.search_entry.get().lower() if self.search_entry.winfo_ismapped() else self.search_value_combobox.get().lower()
+        field = self.search_combobox.get()
+
+        if not query or field == "Seleccione Campo":
+            messagebox.showwarning("Advertencia", "Ingrese un término de búsqueda y seleccione un campo")
+            return
+
+        if field in ["Autorización", "Estado de la Cirugía", "Estado Presupuesto"]:
+            # Realizar coincidencia exacta
+            self.filtered_data = [record for record in self.data if record[field].lower() == query]
+        else:
+            # Búsqueda parcial para otros campos
+            self.filtered_data = [record for record in self.data if query in record[field].lower()]
+
+        self.populate_treeview(self.filtered_data)
+
+    def clear_search(self):
+        self.search_entry.delete(0, tk.END)
+        self.search_combobox.set("Seleccione Campo")
+        self.filtered_data = []
+        self.populate_treeview()
+
+    def on_search_combobox_selected(self, event):
+        field = self.search_combobox.get()
+
+        if field in ["Autorización", "Estado de la Cirugía", "Estado Presupuesto"]:
+            if field == "Autorización":
+                self.search_value_combobox['values'] = ["Autorizado", "No Autorizado", "Pendiente"]
+            elif field == "Estado de la Cirugía":
+                self.search_value_combobox['values'] = ["Programada", "No Programada"]
+            elif field == "Estado Presupuesto":
+                self.search_value_combobox['values'] = ["Autorizado", "No Autorizado", "Otros"]
+            
+            self.search_entry.pack_forget()
+            self.search_value_combobox.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+            self.search_value_combobox.set("")
+            self.search_value_combobox.pack(side=tk.LEFT, padx=5)
+        else:
+            self.search_value_combobox.pack_forget()
+            self.search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=5)
+
+    def on_treeview_select(self, event):
+        selected_item = self.tree.selection()
+        if selected_item:
+            item = self.tree.item(selected_item)
+            for label, entry in self.entries.items():
+                entry.delete(0, tk.END)
+                entry.insert(0, item["values"][self.tree["columns"].index(label)])
+
+    def on_main_frame_click(self, event):
+        # Verifica si el clic es fuera del Treeview y los campos de entrada
+        if not (self.tree.winfo_containing(event.x, event.y) or 
+                any(entry.winfo_containing(event.x, event.y) for entry in self.entries.values()) or
+                self.search_entry.winfo_containing(event.x, event.y) or
+                self.search_value_combobox.winfo_containing(event.x, event.y) or
+                self.search_combobox.winfo_containing(event.x, event.y)):
+            self.clear_entries()
+
+    def populate_treeview(self, data=None):
+        for row in self.tree.get_children():
+            self.tree.delete(row)
+
+        if data is None:
+            data = self.data
+
+        for record in data:
+            self.tree.insert('', 'end', values=tuple(record[col] for col in self.tree['columns']))
+
+    def save_data(self):
+        df = pd.DataFrame(self.data)
+        df.to_excel(self.file_name, index=False)
+
+    def load_data(self):
+        if os.path.exists(self.file_name):
+            df = pd.read_excel(self.file_name)
+            self.data = df.to_dict(orient='records')
+
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = PlanificacionQuirofanos(root)
+    root.mainloop()
